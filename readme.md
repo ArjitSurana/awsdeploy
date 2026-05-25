@@ -29,7 +29,8 @@ This guide deploys the app on a single **EC2** instance with **nginx** in front 
 | Git repo | GitHub (or copy project via `scp`) |
 
 **Recommended instance:** `t3.medium` (2 vCPU, 4 GB RAM) — PySpark needs memory.  
-**OS:** Ubuntu 22.04 LTS  
+**OS:** **Amazon Linux 2023 AMI** (64-bit)  
+**SSH user:** `ec2-user`  
 **Region:** pick one close to you (e.g. `ap-south-1` Mumbai)
 
 ---
@@ -60,7 +61,7 @@ Do **not** commit `.env` (API keys). Use `.env.example` only.
 
 1. AWS Console → **EC2** → **Launch instance**
 2. **Name:** `snapmeal-ai`
-3. **AMI:** Ubuntu Server 22.04 LTS (64-bit)
+3. **AMI:** **Amazon Linux 2023 AMI** (64-bit, x86) — *not* Amazon Linux 2 unless you adapt packages
 4. **Instance type:** `t3.medium`
 5. **Key pair:** Create new or select existing → download `.pem`
 6. **Network / Security group:** Create security group with:
@@ -83,7 +84,7 @@ Do **not** commit `.env` (API keys). Use `.env.example` only.
 Windows PowerShell:
 
 ```powershell
-ssh -i "C:\path\to\your-key.pem" ubuntu@YOUR_EC2_PUBLIC_IP
+ssh -i "C:\path\to\your-key.pem" ec2-user@YOUR_EC2_PUBLIC_IP
 ```
 
 First time: type `yes` when asked about host authenticity.
@@ -94,14 +95,14 @@ First time: type `yes` when asked about host authenticity.
 
 ```bash
 cd ~
-git clone https://github.com/YOUR_USER/FoodAIProject.git
+git clone https://github.com/YOUR_USER/awsdeploy.git FoodAIProject
 cd FoodAIProject
 ```
 
 If you do not use GitHub, copy from your PC instead:
 
 ```powershell
-scp -i "C:\path\to\your-key.pem" -r C:\Users\arjit\Desktop\FoodAIProject ubuntu@YOUR_EC2_PUBLIC_IP:~/
+scp -i "C:\path\to\your-key.pem" -r C:\Users\arjit\Desktop\FoodAIProject ec2-user@YOUR_EC2_PUBLIC_IP:~/
 ```
 
 ---
@@ -170,7 +171,7 @@ You should see SnapMeal AI. First page load may be slow while Spark starts.
 2. On EC2:
 
 ```bash
-sudo apt install certbot python3-certbot-nginx -y
+sudo dnf install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com
 ```
 
@@ -196,11 +197,11 @@ sudo systemctl restart snapmeal
 
 | Problem | Fix |
 |---------|-----|
-| Site not loading | `sudo ufw allow 80` if UFW is on; check security group allows HTTP |
+| Site not loading | EC2 security group must allow HTTP (80); check `sudo systemctl status nginx` |
 | `snapmeal` failed | `journalctl -u snapmeal -n 50` — often missing `.env` or bad API key |
-| PySpark / Java error | `java -version` should show 17; `echo $JAVA_HOME` |
+| PySpark / Java error | `java -version` → 17; `echo $JAVA_HOME` (Corretto path) |
+| 502 from nginx | `curl http://127.0.0.1:8501`; SELinux: `sudo setsebool -P httpd_can_network_connect 1` |
 | Out of memory | Use `t3.medium` or larger; Spark needs ~2 GB free |
-| 502 from nginx | Streamlit not up: `curl http://127.0.0.1:8501` on the server |
 
 ---
 

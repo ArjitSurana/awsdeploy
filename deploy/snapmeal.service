@@ -4,13 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/FoodAIProject
-EnvironmentFile=/home/ubuntu/FoodAIProject/.env
-Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-Environment=PYSPARK_PYTHON=/home/ubuntu/FoodAIProject/venv/bin/python
-Environment=PYSPARK_DRIVER_PYTHON=/home/ubuntu/FoodAIProject/venv/bin/python
-ExecStart=/home/ubuntu/FoodAIProject/venv/bin/streamlit run app.py \
+User=ec2-user
+WorkingDirectory=/home/ec2-user/FoodAIProject
+EnvironmentFile=/home/ec2-user/FoodAIProject/.env
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto
+Environment=PYSPARK_PYTHON=/home/ec2-user/FoodAIProject/venv/bin/python
+Environment=PYSPARK_DRIVER_PYTHON=/home/ec2-user/FoodAIProject/venv/bin/python
+ExecStart=/home/ec2-user/FoodAIProject/venv/bin/streamlit run app.py \
   --server.port=8501 \
   --server.address=127.0.0.1 \
   --server.headless=true \
