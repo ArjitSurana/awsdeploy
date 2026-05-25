@@ -4,4 +4,4 @@ Pillow>=10.0.0
 python-dotenv>=1.0.0
 gTTS>=2.5.0
 pandas>=2.0.0
-pyspark>=3.5.0
+pyspark==3.5.4

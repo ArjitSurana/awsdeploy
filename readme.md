@@ -72,7 +72,7 @@ Do **not** commit `.env` (API keys). Use `.env.example` only.
    | HTTP | 80 | 0.0.0.0/0 |
    | HTTPS | 443 | 0.0.0.0/0 (optional, for SSL later) |
 
-7. **Storage:** 20–30 GB gp3
+7. **Storage:** **30 GB gp3 minimum** (8 GB default is too small for PySpark + pip)
 8. **Launch instance**
 
 9. Note the **Public IPv4 address** (e.g. `3.110.x.x`)
@@ -202,6 +202,39 @@ sudo systemctl restart snapmeal
 | PySpark / Java error | `java -version` → 17; `echo $JAVA_HOME` (Corretto path) |
 | 502 from nginx | `curl http://127.0.0.1:8501`; SELinux: `sudo setsebool -P httpd_can_network_connect 1` |
 | Out of memory | Use `t3.medium` or larger; Spark needs ~2 GB free |
+| `No space left on device` / PySpark wheel build failed | Root disk full — see below |
+
+### Fix: No space left on device (PySpark install)
+
+EC2 default **8 GB** disk is often too small. PySpark can use **3–5 GB** during install.
+
+**1. Free space now (on the server):**
+
+```bash
+df -h
+sudo dnf clean all
+rm -rf ~/.cache/pip /tmp/*
+cd ~/FoodAIProject
+source venv/bin/activate 2>/dev/null || python3 -m venv venv && source venv/bin/activate
+pip install --upgrade pip wheel
+pip install --no-cache-dir --only-binary=:all: "pyspark==3.5.4"
+pip install --no-cache-dir -r requirements.txt
+```
+
+**2. Increase EBS volume (recommended):**
+
+1. AWS Console → **EC2** → **Volumes** → select root volume → **Modify volume** → **30 GiB**
+2. On the instance:
+
+```bash
+# Amazon Linux 2023 (NVMe root — adjust device if different)
+lsblk
+sudo growpart /dev/nvme0n1 1
+sudo xfs_growfs -d /
+df -h
+```
+
+3. Re-run: `./deploy/setup_ec2.sh`
 
 ---
 

@@ -21,14 +21,31 @@ if ! grep -q "^JAVA_HOME=" /etc/environment 2>/dev/null; then
   echo "JAVA_HOME=$JAVA_HOME" | sudo tee -a /etc/environment
 fi
 
+echo "==> Disk space check"
+df -h /
+AVAIL_MB=$(df / --output=avail -m 2>/dev/null | tail -1 | tr -d ' ')
+if [ -n "${AVAIL_MB:-}" ] && [ "$AVAIL_MB" -lt 2500 ]; then
+  echo "ERROR: Less than 2.5 GB free on /. PySpark needs space."
+  echo "Fix: EC2 → Volumes → increase root volume to 20–30 GB, then:"
+  echo "  sudo growpart /dev/nvme0n1 1 && sudo xfs_growfs -d /"
+  exit 1
+fi
+
+echo "==> Free space before pip (PySpark is large)"
+sudo dnf clean all
+rm -rf ~/.cache/pip /tmp/pip-* /tmp/build-* 2>/dev/null || true
+
 echo "==> App directory: $APP_DIR"
 cd "$APP_DIR"
 
 echo "==> Python venv"
 $PY -m venv venv
 source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+pip install --upgrade pip wheel
+
+# Use pre-built wheel only — never compile PySpark from source (needs 5+ GB)
+pip install --no-cache-dir --only-binary=:all: "pyspark==3.5.4"
+pip install --no-cache-dir -r requirements.txt
 
 echo "==> PySpark Python paths"
 PY_EXEC="$APP_DIR/venv/bin/python"
