@@ -1,4 +1,12 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="SnapMeal AI",
+    page_icon="🍔",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 import google.generativeai as genai
 from PIL import Image
 import json
@@ -8,7 +16,25 @@ from gtts import gTTS
 import tempfile
 from dotenv import load_dotenv
 
+from services.spark_service import SparkFoodService
+from services.nutrition_service import enrich_analysis
+
 load_dotenv()
+
+
+@st.cache_resource
+def get_spark_service() -> SparkFoodService:
+    return SparkFoodService.get_instance()
+
+
+spark_service = get_spark_service()
+
+LANGUAGE_CODES = {
+    "English": "en",
+    "Hindi": "hi",
+    "Japanese": "ja",
+    "French": "fr"
+}
 
 # ----------------------------
 # STEP 1: Add Your API Key Here
@@ -17,30 +43,25 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 model = genai.GenerativeModel("models/gemini-2.5-flash")
 
-# ----------------------------
-# Page Config & Theme
-# ----------------------------
-st.set_page_config(
-    page_title="SnapMeal AI",
-    page_icon="🍔",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # Theme Toggle
 if 'theme' not in st.session_state:
     st.session_state.theme = "light"
 
-def generate_speech_summary(food_data):
+def generate_speech_summary(food_data, language):
     try:
         summary_prompt = f"""
-        Give a short, friendly, spoken-style summary (4-5 sentences)
-        of this food item based on the following data:
+Give a short, friendly, spoken-style summary (4-5 sentences)
+of this food item based on the following data.
 
-        {json.dumps(food_data, indent=2)}
+The summary must be in {language}.
 
-        Make it natural and conversational.
-        """
+Food Data:
+{json.dumps(food_data, indent=2)}
+
+Make it natural and conversational.
+Do NOT return JSON.
+Return plain text only.
+"""
 
         response = model.generate_content(summary_prompt)
 
@@ -52,9 +73,11 @@ def generate_speech_summary(food_data):
     except Exception as e:
         return f"❌ Speech Error: {str(e)}"
     
-def text_to_speech(text):
+
+    
+def text_to_speech(text, lang_code):
     try:
-        tts = gTTS(text=text, lang="en")
+        tts = gTTS(text=text, lang=lang_code)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
@@ -85,7 +108,7 @@ if 'dietary_preference' not in st.session_state:
 st.markdown("""
 <style>
 .main-header {
-    font-size: 110px !important;
+    font-size: 100px !important;
     font-weight: 900 !important;
     text-align: left !important;
     margin-top: -30px;
@@ -168,7 +191,7 @@ with st.sidebar:
     st.subheader("🌐 Language")
     language = st.selectbox(
         "Select Language",
-        ["English", "Spanish", "French", "German", "Chinese", "Japanese"]
+        ["English", "Hindi", "Japanese", "French"]
     )
     
     # Dietary Preferences
@@ -183,7 +206,13 @@ with st.sidebar:
     st.subheader("📊 Quick Stats")
     st.metric("Total Analyses", len(st.session_state.history))
     st.metric("Favorites", len(st.session_state.favorites))
-    st.metric("Calories Logged", sum(st.session_state.calorie_log) if st.session_state.calorie_log else 0)
+    log_stats = spark_service.aggregate_calorie_log(st.session_state.calorie_log)
+    st.metric(
+        "Calories Logged",
+        int(log_stats.get("total", 0)) if log_stats else 0,
+    )
+    if log_stats:
+        st.caption(f"PySpark avg per entry: {log_stats.get('average', 0)} kcal")
 
 # ----------------------------
 # Main Header
@@ -198,12 +227,13 @@ st.write("Upload a food image and get full details with advanced features!")
 # ----------------------------
 # Tabs for different features
 # ----------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🔍 Analyze Food", 
-    "📜 History", 
-    "⭐ Favorites", 
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🔍 Analyze Food",
+    "📜 History",
+    "⭐ Favorites",
     "📈 Compare",
-    "🧮 Calorie Calculator"
+    "🧮 Calorie Calculator",
+    "⚡ Spark Analytics",
 ])
 
 # ----------------------------
@@ -228,13 +258,13 @@ Analyze this food image.
 User's dietary preference: {dietary}
 
 IMPORTANT:
-Return ONLY valid JSON.
-Do not write explanations.
-Do not use markdown.
-Do not use 
-```
-json.
-Only return raw JSON.
+- Return ONLY valid JSON.
+- Do not write explanations.
+- Do not use markdown.
+- Do not wrap in ```json.
+- All TEXT VALUES must be written in {language}.
+- Keep JSON keys in English.
+- Only translate the values, NOT the keys.
 
 Format:
 
@@ -266,6 +296,10 @@ Format:
                         end = raw_text.rfind("}") + 1
                         json_text = raw_text[start:end]
                         data = json.loads(json_text)
+                        # PySpark RAG: verified nutrition from food database
+                        data, enriched = enrich_analysis(data, spark_service)
+                        if enriched:
+                            st.info("📚 Verified nutrition data applied via PySpark lookup.")
                         
                         # Save to history
                         st.session_state.history.append({
@@ -277,7 +311,7 @@ Format:
                         
                         # Store current analysis
                         st.session_state.current_analysis = data
-                        speech = generate_speech_summary(data)
+                        speech = generate_speech_summary(data, language)
                         st.session_state.current_speech = speech
                         
                         st.success("✅ Analysis Complete!")
@@ -408,7 +442,10 @@ Format:
                 st.info(speech_text)
 
                 if st.button("▶ Play Audio"):
-                    audio_file = text_to_speech(speech_text)
+                    audio_file = text_to_speech(
+                        speech_text,
+                        LANGUAGE_CODES[language]
+                    )
                     if audio_file:
                         audio_bytes = open(audio_file, "rb").read()
                         st.audio(audio_bytes, format="audio/mp3")
@@ -556,9 +593,13 @@ with tab4:
                     ]
                 }
                 
-                # Display comparison
+                # PySpark nutrient comparison
+                spark_comparison = spark_service.compare_history_items(item1, item2)
+                if spark_comparison:
+                    st.dataframe(spark_comparison, use_container_width=True, hide_index=True)
+
                 ccol1, ccol2, ccol3, ccol4 = st.columns(4)
-                
+
                 with ccol1:
                     st.metric("Calories", n1.get('calories', 'N/A'), delta=n2.get('calories', 'N/A'))
                 with ccol2:
@@ -608,6 +649,11 @@ with tab5:
             height = st.number_input("Height (cm)", min_value=1.0, value=170.0)
         with p_col3:
             age = st.number_input("Age", min_value=1, value=30)
+
+        gender = st.selectbox(
+            "Gender",
+            ["Male", "Female"]
+        )
         
         activity_level = st.select_slider(
             "Activity Level",
@@ -615,23 +661,25 @@ with tab5:
             value="Moderate"
         )
     
-    # Calculate BMR
-    bmr = 10 * weight + 6.25 * height - 5 * age + 5  # Male formula
-    bmr = bmr - 161  # Adjust for female (simplified)
-    
+    # BMR (Mifflin-St Jeor)
+    if gender == "Male":
+        bmr = 10 * weight + 6.25 * height - 5 * age + 5
+    else:
+        bmr = 10 * weight + 6.25 * height - 5 * age - 161
+
     activity_multipliers = {
         "Sedentary": 1.2,
         "Light": 1.375,
         "Moderate": 1.55,
         "Active": 1.725,
-        "Very Active": 1.9
+        "Very Active": 1.9,
     }
-    
+
     tdee = bmr * activity_multipliers[activity_level]
-    
+
     st.subheader("🎯 Your Daily Calorie Needs")
     d_col1, d_col2, d_col3, d_col4 = st.columns(4)
-    
+
     with d_col1:
         st.metric("BMR", f"{int(bmr)} kcal")
     with d_col2:
@@ -640,34 +688,37 @@ with tab5:
         st.metric("To Lose Weight", f"{int(tdee - 500)} kcal")
     with d_col4:
         st.metric("To Gain Weight", f"{int(tdee + 500)} kcal")
-    
+
     st.divider()
-    
-    # Today's Log
+
     st.subheader("📝 Today's Food Log")
-    
+
     if st.session_state.calorie_log:
-        total_today = sum(st.session_state.calorie_log)
+        log_stats = spark_service.aggregate_calorie_log(st.session_state.calorie_log)
+        total_today = log_stats.get("total", sum(st.session_state.calorie_log))
         remaining = tdee - total_today
-        
-        st.progress(min(total_today / tdee, 1.0), text=f"{total_today} / {int(tdee)} kcal")
-        
+
+        st.progress(min(total_today / tdee, 1.0), text=f"{int(total_today)} / {int(tdee)} kcal")
+        st.caption(
+            f"PySpark: {int(log_stats.get('entries', 0))} entries, "
+            f"avg {log_stats.get('average', 0)} kcal, max {log_stats.get('max_entry', 0)} kcal"
+        )
+
         if remaining > 0:
             st.success(f"✅ {int(remaining)} calories remaining")
         else:
             st.warning(f"⚠️ {int(abs(remaining))} calories over your daily limit!")
-        
+
         st.write("**Logged Foods:**")
         for i, cal in enumerate(st.session_state.calorie_log):
             st.write(f"  {i+1}. {cal} kcal")
-        
+
         if st.button("🗑 Clear Today's Log"):
             st.session_state.calorie_log = []
             st.rerun()
     else:
         st.info("No foods logged today. Analyze some foods and click 'Log Calories' to add them!")
-    
-    # Quick Add
+
     st.divider()
     st.subheader("⚡ Quick Add")
     quick_cal = st.number_input("Add custom calories", min_value=0, value=0)
@@ -678,12 +729,72 @@ with tab5:
             st.rerun()
 
 # ----------------------------
+# Tab 6: Spark Analytics
+# ----------------------------
+with tab6:
+    st.subheader("⚡ PySpark Analytics")
+
+    overview = spark_service.get_database_overview()
+    o_col1, o_col2, o_col3, o_col4 = st.columns(4)
+    with o_col1:
+        st.metric("Foods in DB", int(overview.get("total_foods", 0)))
+    with o_col2:
+        st.metric("Avg Calories", overview.get("avg_calories", 0))
+    with o_col3:
+        st.metric("Max Calories", overview.get("max_calories", 0))
+    with o_col4:
+        st.metric("Min Calories", overview.get("min_calories", 0))
+
+    st.divider()
+
+    left, right = st.columns(2)
+
+    with left:
+        st.subheader("🌍 Avg Nutrition by Cuisine")
+        cuisine_stats = spark_service.get_cuisine_stats()
+        if cuisine_stats:
+            import pandas as pd
+            st.dataframe(pd.DataFrame(cuisine_stats), use_container_width=True, hide_index=True)
+
+    with right:
+        st.subheader("🔥 Top Foods by Calories")
+        top_foods = spark_service.top_foods_by_metric("calories", limit=8)
+        if top_foods:
+            import pandas as pd
+            st.dataframe(pd.DataFrame(top_foods), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("🔎 Search Food Database (PySpark)")
+    search_query = st.text_input("Search by name", placeholder="e.g. pizza, biryani")
+    if search_query:
+        results = spark_service.search_foods(search_query)
+        if results:
+            import pandas as pd
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        else:
+            st.warning("No matches in the verified database.")
+
+    st.divider()
+    st.subheader("📊 Your Analysis History (PySpark)")
+    if st.session_state.history:
+        history_stats = spark_service.get_history_stats(st.session_state.history)
+        h_col1, h_col2, h_col3 = st.columns(3)
+        with h_col1:
+            st.metric("Analyses", int(history_stats.get("analyses", 0)))
+        with h_col2:
+            st.metric("Avg Calories", history_stats.get("avg_calories", 0))
+        with h_col3:
+            st.metric("Avg Health Score", history_stats.get("avg_health_score", 0))
+    else:
+        st.info("Analyze some foods first to see history analytics.")
+
+# ----------------------------
 # Footer
 # ----------------------------
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #888;">
     <p>🍔 SnapMeal AI - Your Personal Nutrition Assistant</p>
-    <p>Powered by Google Gemini AI</p>
+    <p>Powered by Google Gemini AI & Apache PySpark</p>
 </div>
 """, unsafe_allow_html=True)

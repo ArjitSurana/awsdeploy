@@ -1,0 +1,22 @@
+[Unit]
+Description=SnapMeal AI (Streamlit + PySpark)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/FoodAIProject
+EnvironmentFile=/home/ubuntu/FoodAIProject/.env
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+Environment=PYSPARK_PYTHON=/home/ubuntu/FoodAIProject/venv/bin/python
+Environment=PYSPARK_DRIVER_PYTHON=/home/ubuntu/FoodAIProject/venv/bin/python
+ExecStart=/home/ubuntu/FoodAIProject/venv/bin/streamlit run app.py \
+  --server.port=8501 \
+  --server.address=127.0.0.1 \
+  --server.headless=true \
+  --browser.gatherUsageStats=false
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
