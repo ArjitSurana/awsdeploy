@@ -204,24 +204,17 @@ sudo systemctl restart snapmeal
 | Out of memory | Use `t3.medium` or larger; Spark needs ~2 GB free |
 | `No space left on device` / PySpark wheel build failed | Root disk full — see below |
 
-### Fix: No space left on device (PySpark install)
+### Fix: PySpark install / disk full
 
-EC2 default **8 GB** disk is often too small. PySpark can use **3–5 GB** during install.
-
-**1. Free space now (on the server):**
+PySpark has **no pre-built wheel** on PyPI — pip builds from source (~4–6 GB temp space). Use a **30 GB** root volume (see Step 2).
 
 ```bash
-df -h
-sudo dnf clean all
-rm -rf ~/.cache/pip /tmp/*
-cd ~/FoodAIProject
-source venv/bin/activate 2>/dev/null || python3 -m venv venv && source venv/bin/activate
-pip install --upgrade pip wheel
-pip install --no-cache-dir --only-binary=:all: "pyspark==3.5.4"
-pip install --no-cache-dir -r requirements.txt
+./deploy/setup_ec2.sh
 ```
 
-**2. Increase EBS volume (recommended):**
+Do **not** use `pip install --only-binary pyspark` — it fails with `from versions: none`.
+
+**Increase EBS volume if install fails:**
 
 1. AWS Console → **EC2** → **Volumes** → select root volume → **Modify volume** → **30 GiB**
 2. On the instance:

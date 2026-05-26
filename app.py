@@ -23,7 +23,7 @@ load_dotenv()
 
 
 @st.cache_resource
-def get_spark_service() -> SparkFoodService:
+def get_spark_service():
     return SparkFoodService.get_instance()
 
 
@@ -732,7 +732,8 @@ with tab5:
 # Tab 6: Spark Analytics
 # ----------------------------
 with tab6:
-    st.subheader("⚡ PySpark Analytics")
+    engine = getattr(spark_service, "engine", "unknown")
+    st.subheader(f"⚡ Analytics ({engine})")
 
     overview = spark_service.get_database_overview()
     o_col1, o_col2, o_col3, o_col4 = st.columns(4)

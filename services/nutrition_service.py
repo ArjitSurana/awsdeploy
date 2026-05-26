@@ -1,13 +1,10 @@
-"""Merge AI analysis with PySpark-verified nutrition data."""
+"""Merge AI analysis with PySpark nutrition data."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from services.spark_service import SparkFoodService
-
-
-def enrich_analysis(data: dict[str, Any], spark_service: SparkFoodService) -> tuple[dict[str, Any], bool]:
+def enrich_analysis(data: dict[str, Any], spark_service: Any) -> tuple[dict[str, Any], bool]:
     """
     Override AI nutrient estimates with verified database values when a match exists.
     Returns (enriched_data, was_enriched).

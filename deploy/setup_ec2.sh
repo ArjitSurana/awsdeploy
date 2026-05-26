@@ -14,45 +14,40 @@ sudo dnf install -y \
   java-17-amazon-corretto \
   gcc python3-devel
 
-echo "==> Java (Amazon Corretto 17)"
+echo "==> Java"
 JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(which java)")")")"
 export JAVA_HOME
 if ! grep -q "^JAVA_HOME=" /etc/environment 2>/dev/null; then
   echo "JAVA_HOME=$JAVA_HOME" | sudo tee -a /etc/environment
 fi
 
-echo "==> Disk space check"
+echo "==> Disk space (PySpark pip install needs ~30 GB root volume, 4+ GB free)"
 df -h /
 AVAIL_MB=$(df / --output=avail -m 2>/dev/null | tail -1 | tr -d ' ')
-if [ -n "${AVAIL_MB:-}" ] && [ "$AVAIL_MB" -lt 2500 ]; then
-  echo "ERROR: Less than 2.5 GB free on /. PySpark needs space."
-  echo "Fix: EC2 → Volumes → increase root volume to 20–30 GB, then:"
-  echo "  sudo growpart /dev/nvme0n1 1 && sudo xfs_growfs -d /"
+if [ -n "${AVAIL_MB:-}" ] && [ "$AVAIL_MB" -lt 4000 ]; then
+  echo "ERROR: Need 4+ GB free. Expand EBS to 30 GB, then: sudo growpart /dev/nvme0n1 1 && sudo xfs_growfs -d /"
   exit 1
 fi
 
-echo "==> Free space before pip (PySpark is large)"
 sudo dnf clean all
 rm -rf ~/.cache/pip /tmp/pip-* /tmp/build-* 2>/dev/null || true
 
 echo "==> App directory: $APP_DIR"
 cd "$APP_DIR"
 
-echo "==> Python venv"
+echo "==> Python venv + PySpark"
 $PY -m venv venv
 source venv/bin/activate
-pip install --upgrade pip wheel
-
-# Use pre-built wheel only — never compile PySpark from source (needs 5+ GB)
-pip install --no-cache-dir --only-binary=:all: "pyspark==3.5.4"
+pip install --upgrade pip setuptools wheel
+mkdir -p "$HOME/pip_build"
+export TMPDIR="$HOME/pip_build"
 pip install --no-cache-dir -r requirements.txt
 
-echo "==> PySpark Python paths"
 PY_EXEC="$APP_DIR/venv/bin/python"
-if ! grep -q "^PYSPARK_PYTHON=" /etc/environment 2>/dev/null; then
+grep -q "^PYSPARK_PYTHON=" /etc/environment 2>/dev/null || {
   echo "PYSPARK_PYTHON=$PY_EXEC" | sudo tee -a /etc/environment
   echo "PYSPARK_DRIVER_PYTHON=$PY_EXEC" | sudo tee -a /etc/environment
-fi
+}
 
 if [ ! -f .env ]; then
   echo "WARNING: Create $APP_DIR/.env with GOOGLE_API_KEY=..."
@@ -63,17 +58,18 @@ sudo cp deploy/snapmeal.service /etc/systemd/system/snapmeal.service
 sudo sed -i "s|/home/ec2-user/FoodAIProject|$APP_DIR|g" /etc/systemd/system/snapmeal.service
 sudo sed -i "s|User=ec2-user|User=$APP_USER|g" /etc/systemd/system/snapmeal.service
 sudo sed -i "s|JAVA_HOME=.*|JAVA_HOME=$JAVA_HOME|g" /etc/systemd/system/snapmeal.service
+sudo sed -i "s|PYSPARK_PYTHON=.*|PYSPARK_PYTHON=$PY_EXEC|g" /etc/systemd/system/snapmeal.service
+sudo sed -i "s|PYSPARK_DRIVER_PYTHON=.*|PYSPARK_DRIVER_PYTHON=$PY_EXEC|g" /etc/systemd/system/snapmeal.service
 sudo systemctl daemon-reload
 sudo systemctl enable snapmeal
 sudo systemctl restart snapmeal
 
-echo "==> nginx (conf.d — Amazon Linux layout)"
+echo "==> nginx"
 sudo cp deploy/nginx-snapmeal.conf /etc/nginx/conf.d/snapmeal.conf
 sudo nginx -t
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
-echo "==> SELinux: allow nginx to proxy to Streamlit"
 if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; then
   sudo setsebool -P httpd_can_network_connect 1 || true
 fi
